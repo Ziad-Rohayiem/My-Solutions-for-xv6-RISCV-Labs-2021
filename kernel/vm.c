@@ -303,7 +303,6 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
   pte_t *pte;
   uint64 pa, i;
   uint flags;
-  char *mem;
 
   for(i = 0; i < sz; i += PGSIZE){
     if((pte = walk(old, i, 0)) == 0)
@@ -312,13 +311,20 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
       panic("uvmcopy: page not present");
     pa = PTE2PA(*pte);
     flags = PTE_FLAGS(*pte);
-    if((mem = kalloc()) == 0)
-      goto err;
-    memmove(mem, (char*)pa, PGSIZE);
-    if(mappages(new, i, PGSIZE, (uint64)mem, flags) != 0){
-      kfree(mem);
+
+    // Instead of allocating and copying, share the page
+    // Clear PTE_W and set PTE_COW for both parent and child
+    if(flags & PTE_W) {
+      flags = (flags & ~PTE_W) | PTE_COW;
+      *pte = PA2PTE(pa) | flags;
+    }
+
+    // Map the same physical page in child
+    if(mappages(new, i, PGSIZE, (uint64)pa, flags) != 0){
       goto err;
     }
+    // Increment reference count since page is now shared
+    krefpage((void*)pa);
   }
   return 0;
 
@@ -353,6 +359,19 @@ copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
     pa0 = walkaddr(pagetable, va0);
     if(pa0 == 0)
       return -1;
+    
+    // Check if this is a COW page
+    pte_t *pte = walk(pagetable, va0, 0);
+    if(pte && (*pte & PTE_COW)) {
+      // Handle COW before writing
+      if(cowhandler(pagetable, va0) < 0)
+        return -1;
+      // Get the new physical address after COW handling
+      pa0 = walkaddr(pagetable, va0);
+      if(pa0 == 0)
+        return -1;
+    }
+    
     n = PGSIZE - (dstva - va0);
     if(n > len)
       n = len;
@@ -364,7 +383,6 @@ copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
   }
   return 0;
 }
-
 // Copy from user to kernel.
 // Copy len bytes to dst from virtual address srcva in a given page table.
 // Return 0 on success, -1 on error.
@@ -431,4 +449,51 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
   } else {
     return -1;
   }
+}
+
+// Handle a COW page fault
+// Allocates a new page, copies content, and updates page table
+int
+cowhandler(pagetable_t pagetable, uint64 va)
+{
+  if(va >= MAXVA)
+    return -1;
+  
+  pte_t *pte = walk(pagetable, va, 0);
+  if(pte == 0)
+    return -1;
+  if((*pte & PTE_V) == 0)
+    return -1;
+  if((*pte & PTE_U) == 0)
+    return -1;
+  
+  // Check if this is a COW page
+  if((*pte & PTE_COW) == 0)
+    return -1;
+  
+  uint64 pa = PTE2PA(*pte);
+  uint flags = PTE_FLAGS(*pte);
+  
+  // Check reference count - if we're the only one, just make it writable
+  if(krefcount((void*)pa) == 1) {
+    // We're the only reference, just restore write permission
+    *pte = PA2PTE(pa) | ((flags & ~PTE_COW) | PTE_W);
+    return 0;
+  }
+  
+  // Allocate new page
+  char *mem = kalloc();
+  if(mem == 0)
+    return -1;
+  
+  // Copy old page to new page
+  memmove(mem, (char*)pa, PGSIZE);
+  
+  // Update PTE to point to new page with write permission
+  *pte = PA2PTE((uint64)mem) | ((flags & ~PTE_COW) | PTE_W);
+  
+  // Decrement reference count on old page
+  kfree((void*)pa);
+  
+  return 0;
 }
