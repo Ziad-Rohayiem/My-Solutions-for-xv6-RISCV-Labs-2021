@@ -53,6 +53,7 @@ int fork1(void);  // Fork but panics on failure.
 void panic(char*);
 struct cmd *parsecmd(char*);
 
+void runcmd(struct cmd*) __attribute__((noreturn)); // Fixing compiler warning: "Infinite Recursion Detected --> runcmd()"
 // Execute cmd.  Never returns.
 void
 runcmd(struct cmd *cmd)
