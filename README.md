@@ -60,3 +60,6 @@ When running xv6 inside QEMU, the terminal captures your input. Here are essenti
 *   **Exit QEMU**: Press `Ctrl + A`, release, then press `x`.
 *   **Show Help**: Press `Ctrl + A`, release, then press `h`.
 *   **Switch to Monitor**: Press `Ctrl + A`, release, then press `c` (allows you to inspect registers/memory).
+
+## 🔮 Future Work
+I plan to solve the remaining labs in the future, in shaa Allah.
