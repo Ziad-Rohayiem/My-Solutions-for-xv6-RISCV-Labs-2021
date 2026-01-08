@@ -1,82 +1,56 @@
 #include "kernel/types.h"
-#include "user/user.h"
-#include "kernel/fcntl.h"
+// #include "kernel/stat.h"
 #include "kernel/param.h"
+#include "user/user.h"
 
-#define MAX_ARG_LEN 512
+void xargs(char *argv[], int new_argc) {
+  int started_arg = 0;
+  int read_eof = 0;
+  char buf[512];
+  memset(buf, 0, 512);
+  // read until you hit a newline or a EOF and copy that buf ontoo the end ofo
+  // argv;
+  while (1) {
+    int n = read(0, buf + started_arg, 1);
+    started_arg += 1;
+    if (n == 0 || buf[started_arg - 1] == '\n') {
+      if (n == 0 && read_eof > 0)
+        break;
+      else
+        read_eof += 1;
 
-void
-copy_argv(char **ori_argv, int ori_argc, char *new_argv, char **argv)
-{
-  int k = 0;
-  for (int i = 0; i < ori_argc; i++) {
-    argv[k] = malloc(strlen(ori_argv[i]) + 1);
-    memcpy(argv[k++], ori_argv[i], strlen(ori_argv[i]) + 1);
-  }
-  argv[k] = malloc(strlen(new_argv) + 1);
-  memcpy(argv[k++], new_argv, strlen(new_argv) + 1);
-}
-
-
-void
-print(char **s, int n)
-{
-  for (int i = 0; i < n; i++) {
-    printf("%s\n", s[i]);
-  }
-}
-
-int 
-main(int argc, char *argv[])
-{
-  if (argc <= 1) {
-    fprintf(2, "Usage: xargx command [arg ...]\n");
-    exit(1);
-  }
-
-  char param[MAX_ARG_LEN];
-  int i = 0;
-  char ch;
-  int ignore = 0;
-  while (read(0, &ch, 1) > 0) {
-    if (ch == '\n') {
-      if (ignore) {
-        i = 0;
-        ignore = 0;
+      if (buf[started_arg - 1] == '\n' && started_arg == 1) {
+        started_arg--;
         continue;
       }
-      param[i] = 0;
-      i = 0;
-
-      int pid = fork();
-      if (pid == 0) {
-        //child
-        int cmd_argc = argc;
-        
-        char *cmd_argv[MAXARG];
-
-        copy_argv(argv + 1, argc - 1, param, cmd_argv);
-        cmd_argv[cmd_argc] = 0;
-        
-        exec(cmd_argv[0], cmd_argv);
-
-        exit(0);
+      if (buf[started_arg - 1] == '\n')
+        buf[started_arg - 1] = 0;
+      if (fork() == 0) {
+        argv[new_argc] = buf;
+        // printf("argc: %d\n", new_argc + 1);
+        // for (int i = 0; i < new_argc + 1; i++) {
+        //   printf("argv[%d]=%s\n", i, argv[i]);
+        // }
+        exec(argv[0], argv);
       } else {
-        wait((int *)0);
+        wait(0);
       }
-      
-    } else {
-      
-      if (!ignore && i >= MAX_ARG_LEN - 1) {
-        printf("xargs: too long arguments...\n");
-        ignore = 1;
-      }
-
-      if (!ignore) {
-        param[i++] = ch;
-      }
+      memset(buf, 0, started_arg);
+      started_arg = 0;
     }
   }
+}
 
+int main(int argc, char *argv[]) {
+  // reads lines from standard input
+  // rest of argv is the exec command
+  if (argc >= MAXARG) {
+    fprintf(2, "Error: number of arguments have to be less than %d", MAXARG);
+    exit(1);
+  }
+  // TODO: make echo as default command
+  char *argv_new_cmd[MAXARG];
+  memmove(argv_new_cmd, argv + 1, (argc - 1) * sizeof(char *));
+  xargs(argv_new_cmd, argc - 1);
   exit(0);
 }
