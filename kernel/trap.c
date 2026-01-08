@@ -77,8 +77,23 @@ usertrap(void)
     exit(-1);
 
   // give up the CPU if this is a timer interrupt.
-  if(which_dev == 2)
-    yield();
+  if(which_dev == 2) {
+	// alarm
+	if (p->alarm_interval) {
+	  if (++p->ticks_passed == p->alarm_interval) {
+      // But only if an alarm isn't already in progress (prevent re-entrancy)
+      if(p->alarm_in_progress == 0) {
+        // copy the trapframe to the backup_tf
+        memmove(&(p->backup_tf), p->trapframe, sizeof(struct trapframe));
+        // return to alarm handler: call p->alarm_handler();
+        p->trapframe->epc = p->alarm_handler;
+        // Mark that we now have a handler in progress
+        p->alarm_in_progress = 1;
+      }
+	  }
+	}
+     yield();
+  }
 
   usertrapret();
 }
